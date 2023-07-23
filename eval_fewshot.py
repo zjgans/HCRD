@@ -31,7 +31,7 @@ def parse_option():
 
     # load pretrained model
     parser.add_argument('--model', type=str, default='resnet12', choices=model_pool)
-    parser.add_argument('--model_path', type=str, default="./save/S:resnet12_T:resnet12_CIFAR-FS_kd_r:1_a:0.5_dist:1_rkd:1_gT_:0.07_Lt:0.07_mixT:0.07_tag_ ssl_test_dist_kl/ckpt_epoch_90.pth",
+    parser.add_argument('--model_path', type=str, default="./save/~/ckpt_epoch_90.pth",
                         help='absolute path to .pth model')
 
     # dataset   ckpt_epoch_90.pth
@@ -41,7 +41,7 @@ def parse_option():
     parser.add_argument('--transform', type=str, default='A', choices=transforms_list)
 
     # specify data_root
-    parser.add_argument('--data_root_path', type=str, default='/data/lxj/odata/dataset', help='path to data root')
+    parser.add_argument('--data_root_path', type=str, default='/~/dataset', help='path to data root')
     parser.add_argument('--simclr', type=bool, default=False, help='use simple contrastive learning representation')
     parser.add_argument('--trans', type=int, default=12, help='number of transformations')
     parser.add_argument('--proj_dim', type=float, default=128)
