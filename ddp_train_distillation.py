@@ -92,12 +92,12 @@ def parse_option():
 
     # path to teacher model
     parser.add_argument('--path_t', type=str,
-                        default="./save/resnet12_tieredImageNet_lr_0.05_decay_0.0005_a_0.5_supT_0.07_mixT_0.07_trans_A_trial_distill_hybrid/ckpt_epoch_60.pth",
+                        default="./save/~/ckpt_epoch_60.pth",
                         help='teacher model snapshot')
 
     # distillation
     parser.add_argument('--distill', type=str, default='kd', choices=['kd', 'contrast', 'hint', 'attention'])
-    parser.add_argument('--trial', type=str, default='distill_hybrid_ddp_128_60epoch', help='trial id')
+    parser.add_argument('--trial', type=str, default='test', help='trial id')
 
     # KL distillation
     parser.add_argument('--kd_T', type=float, default=4, help='temperature for KD distillation')
