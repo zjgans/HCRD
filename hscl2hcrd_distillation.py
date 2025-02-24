@@ -102,7 +102,7 @@ def parse_option():
     parser.add_argument('--model_path', type=str, default='save/', help='path to save model')
     parser.add_argument('--tb_path', type=str, default='tb/', help='path to tensorboard')
     parser.add_argument('--record_path', type=str, default='./record', help='record the data of results')
-    parser.add_argument('--data_root_path', type=str, default='/data/lxj/odata/dataset', help='path to data root')
+    parser.add_argument('--data_root_path', type=str, default='data/~', help='path to data root')
     parser.add_argument('--cross_domain', type=bool, default=False)
 
     # setting for meta-learning
