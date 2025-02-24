@@ -194,7 +194,7 @@ def load_teacher(model_path, model_name, n_cls, dataset='miniImageNet', embd_siz
     print('==> done')
     return model
 
-
+# Reproduce RFS:https://github.com/WangYueFt/rfs
 def main():
 
     opt = parse_option()
