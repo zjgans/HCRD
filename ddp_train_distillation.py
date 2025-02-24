@@ -10,6 +10,8 @@ import mkl
 import numpy as np
 import wandb
 import torch
+import torch.distributed as dist
+import diffdist
 import torch.optim as optim
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
@@ -37,8 +39,8 @@ from modules.loss import kl_loss, SupCluLoss
 from dataloader import get_eval_dataloader,JigCluTransform,Preprocessor
 from dataset.utils import Trans_to_Num,rot_color_transformation
 
-os.environ["CUDA_VISIBLE_DEVICES"] = '0,1,2'
-os.environ["CUDA_LAUNCH_BLOCKING"]='0'
+# os.environ["CUDA_VISIBLE_DEVICES"] = '0,1,2'
+# os.environ["CUDA_LAUNCH_BLOCKING"]='0'
 mkl.set_num_threads(2)
 
 class Wrapper(nn.Module):
@@ -48,7 +50,6 @@ class Wrapper(nn.Module):
 
         self.model = model
         self.feat = torch.nn.Sequential(*list(self.model.children())[:-2])
-
         self.last = torch.nn.Linear(list(self.model.children())[-2].in_features, 64)
 
     def forward(self, images):
@@ -58,7 +59,6 @@ class Wrapper(nn.Module):
 
         return feat, out
 
-
 def parse_option():
     parser = argparse.ArgumentParser('argument for training')
 
@@ -66,13 +66,13 @@ def parse_option():
     parser.add_argument('--print_freq', type=int, default=10, help='print frequency')
     parser.add_argument('--tb_freq', type=int, default=500, help='tb frequency')
     parser.add_argument('--save_freq', type=int, default=5, help='save frequency')
-    parser.add_argument('--batch_size', type=int, default=128, help='batch_size')
+    parser.add_argument('--batch_size', type=int, default=64, help='batch_size')
     parser.add_argument('--num_workers', type=int, default=0, help='num of workers to use')
-    parser.add_argument('--epochs', type=int, default=60, help='number of training epochs')
+    parser.add_argument('--epochs', type=int, default=90, help='number of training epochs')
 
     # optimization
     parser.add_argument('--learning_rate', type=float, default=0.05, help='learning rate')
-    parser.add_argument('--lr_decay_epochs', type=str, default='30,40,50', help='where to decay lr, can be a list')
+    parser.add_argument('--lr_decay_epochs', type=str, default='60,80', help='where to decay lr, can be a list')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='decay rate for learning rate')
     parser.add_argument('--weight_decay', type=float, default=5e-4, help='weight decay')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
@@ -92,12 +92,12 @@ def parse_option():
 
     # path to teacher model
     parser.add_argument('--path_t', type=str,
-                        default="./save/~/ckpt_epoch_60.pth",
+                        default="checkpoint_testname/ckpt_epoch_90.pth",
                         help='teacher model snapshot')
 
     # distillation
     parser.add_argument('--distill', type=str, default='kd', choices=['kd', 'contrast', 'hint', 'attention'])
-    parser.add_argument('--trial', type=str, default='test', help='trial id')
+    parser.add_argument('--trial', type=str, default='test_ddp', help='trial id')
 
     # KL distillation
     parser.add_argument('--kd_T', type=float, default=4, help='temperature for KD distillation')
@@ -109,7 +109,7 @@ def parse_option():
     parser.add_argument('--model_path', type=str, default='save/', help='path to save model')
     parser.add_argument('--tb_path', type=str, default='tb/', help='path to tensorboard')
     parser.add_argument('--record_path', type=str, default='./record', help='record the data of results')
-    parser.add_argument('--data_root_path', type=str, default='/~/dataset', help='path to data root')
+    parser.add_argument('--data_root', type=str, default='data/~', help='path to data root')
     parser.add_argument('--cross_domain', type=bool, default=False)
 
     # setting for meta-learning
@@ -131,21 +131,24 @@ def parse_option():
     parser.add_argument('-a', '--alpha', type=float, default=1, help='weight balance for KD')
 
     # memory hyper parameters
-    parser.add_argument('--local_t', type=float, default=0.2, help='temperature for local supervision loss')
-    parser.add_argument('--global_t', type=float, default=0.2, help='temperature for global supervision loss')
+    parser.add_argument('--local_t', type=float, default=0.07, help='temperature for local supervision loss')
+    parser.add_argument('--global_t', type=float, default=0.07, help='temperature for global supervision loss')
     parser.add_argument('--distill_t', type=float, default=4.)
-    parser.add_argument('--mix_t', type=float, default=0.2)
+    parser.add_argument('--mix_t', type=float, default=0.07)
+    parser.add_argument('--w_d', type=float, default=25, help='loss cofficient for distance loss')
+    parser.add_argument('--w_a', type=float, default=50, help='loss cofficient for angle loss')
     parser.add_argument('--proj_dim', type=float, default=128)
     parser.add_argument('--trans_type', type=str, default='rot_color_perm12', help='rotation,rotation2,color_perm6,color_perm3,rot_color_perm6,'
                              'rot_color_perm12,rot_color_perm24')
+    parser.add_argument('--use_global_feat',type=float,default=True,help='use the global feat to compute distill loss')
     parser.add_argument('--cross-ratio', default=0.2, type=float, help='four patches crop cross ratio')
     parser.add_argument('--crop_size', type=int, default=84)
     parser.add_argument('--m_patch', type=int, default=2, help='the rule of split for one image,m_patch x m_patch')
     parser.add_argument('--pretrained_path', type=str, default="", help='student pretrained path')
-    parser.add_argument('-gpu', default='0,1,2', help='the GPU ids e.g. \"0\", \"0,1\", \"0,1,2\", etc')
+    parser.add_argument('-gpu', default='3,4', help='the GPU ids e.g. \"0\", \"0,1\", \"0,1,2\", etc')
     parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
                 distributed training; see https://pytorch.org/docs/stable/distributed.html""")
-    parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
+    parser.add_argument("--local_rank", default=-1, type=int, help="Please ignore and do not set this argument.")
     parser.add_argument('--multiprocessing-distributed', action='store_true',help='Use multi-processing distributed training to launch '
                          'N processes per node, which has N GPUs. This is the ''fastest way to use PyTorch for ei ther single node or '
                              'multi node data parallel training')
@@ -180,9 +183,9 @@ def parse_option():
     for it in iterations:
         opt.lr_decay_epochs.append(int(it))
 
-    opt.model_name = 'S:{}_T:{}_{}_{}_r:{}_a:{}_dist:{}_rkd:{}_gT_:{}_Lt:{}_mixT:{}_tag_{}'.format(opt.model_s,opt.model_t,opt.dataset,
+    opt.model_name = 'S:{}_T:{}_{}_{}_r:{}_a:{}_dist:{}_gT_:{}_Lt:{}_mixT:{}_tag_{}'.format(opt.model_s,opt.model_t,opt.dataset,
                                                                                                    opt.distill,opt.gamma, opt.alpha,opt.dist_w,
-                                                                                                   opt.rkd_w,opt.global_t, opt.local_t,opt.mix_t,
+                                                                                                  opt.global_t, opt.local_t,opt.mix_t,
                                                                                                    opt.tags[-1])
     if opt.cosine:
         opt.model_name = '{}_cosine'.format(opt.model_name)
@@ -386,7 +389,6 @@ def get_train_dataloader(opt):
         val_dataset = Preprocessor(val_dataset.img_label, [train_trans,train_trans_aug], JigCluTransform(opt, trans))
         test_dataset = Preprocessor(test_dataset.img_label, [train_trans,train_trans_aug], JigCluTransform(opt, trans))
         dataset = ConcatDataset([train_dataset, val_dataset, test_dataset])
-
         n_cls = 64 + 16 + 20
 
     else:
@@ -394,12 +396,12 @@ def get_train_dataloader(opt):
 
     return dataset,n_cls
 
-def load_teacher(model_path, model_name, n_cls, dataset='miniImageNet', embd_size=128):
+def load_teacher(model_path, model_name, n_cls, dataset='miniImageNet', embd_size=128,num_trans=0):
     """load the teacher model"""
     print('==> loading teacher model')
     print(model_name)
-    model = create_model(model_name, n_cls, dataset, embd_size=embd_size)
-    state_dict = torch.load(model_path)['model_s']
+    model = create_model(model_name, n_cls, dataset, embd_size=embd_size,num_trans=num_trans)
+    state_dict = torch.load(model_path)['model']
     state_dict = {k.replace("module.",""): v for k,v in state_dict.items()}
     model.load_state_dict(state_dict)
     print('==> done')
@@ -413,9 +415,10 @@ def main():
     # wandb.config.update(opt)
     # wandb.save('*.py')
     # wandb.run.save()
-    # print(opt.save_folder)
+    print(opt.save_folder)
     init_distributed_mode(opt)
     ngpus_per_node = torch.cuda.device_count()
+    total_batch_size = opt.batch_size
     opt.batch_size = int(opt.batch_size / ngpus_per_node)
 
     # dataloader
@@ -434,8 +437,8 @@ def main():
     )
     print(f"Data loaded: there are {len(dataset)} images.")
 
-    teacher = load_teacher(opt.path_t, opt.model_t, n_cls, opt.dataset, embd_size=opt.proj_dim)
-    student = create_model(opt.model_s, n_cls, opt.dataset, embd_size=opt.proj_dim)
+    teacher = load_teacher(opt.path_t, opt.model_t, n_cls, opt.dataset, embd_size=opt.proj_dim,num_trans=opt.trans)
+    student = create_model(opt.model_s, n_cls, opt.dataset, embd_size=opt.proj_dim,num_trans=opt.trans)
     student, teacher = student.cuda(), teacher.cuda()
 
     if has_batchnorms(student):
@@ -449,8 +452,8 @@ def main():
         p.requires_grad = False
 
     criterion_kd = DistillKL(opt.kd_T).cuda()
-    criterion_supclu_l = SupCluLoss(opt.local_t)
-    criterion_supclu_g = SupCluLoss(opt.global_t)
+    criterion_supclu_l = SupCluLoss(opt.local_t).cuda()
+    criterion_supclu_g = SupCluLoss(opt.global_t).cuda()
     criterion_rkd = RKDLoss(opt.w_d, opt.w_a).cuda()
     criterion_dist = DIST().cuda()
 
@@ -478,6 +481,7 @@ def main():
 
     # routine: supervised model distillation
     for epoch in range(start_epoch, opt.epochs + 1):
+        train_loader.sampler.set_epoch(epoch)
         if opt.cosine:
             scheduler.step()
         else:
@@ -486,7 +490,7 @@ def main():
 
         time1 = time.time()
         loss = train(epoch, train_loader, student, teacher,
-                     criterion_supclu_l,criterion_supclu_g, criterion_kd, criterion_rkd,criterion_dist, optimizer, opt)
+                     criterion_supclu_l,criterion_supclu_g, criterion_kd, criterion_rkd,criterion_dist, optimizer, opt,total_batch_size)
         time2 = time.time()
         print('epoch {}, total time {:.2f}'.format(epoch, time2 - time1))
 
@@ -517,7 +521,7 @@ def main():
     # final report
     if dist.get_rank()==0:
         print("GENERATING FINAL REPORT")
-        generate_final_report(student, opt)
+        # generate_final_report(student, opt)
         print(opt.save_folder)
     # remove output.txt log file
     # output_log_file = os.path.join(wandb.run.dir, "output.log")
@@ -526,7 +530,8 @@ def main():
     # else:  ## Show an error ##
     #     print("Error: %s file not found" % output_log_file)
 
-def train(epoch, train_loader, model_s, model_t, criterion_supclu_l,criterion_supclu_g,criterion_kd, criterion_rkd, criterion_dist,optimizer, opt):
+def train(epoch, train_loader, model_s, model_t, criterion_supclu_l,criterion_supclu_g,
+          criterion_kd, criterion_rkd, criterion_dist,optimizer, opt,batch_size):
     """One epoch training"""
     model_s.train()
     model_t.eval()
@@ -541,28 +546,34 @@ def train(epoch, train_loader, model_s, model_t, criterion_supclu_l,criterion_su
 
     for iter, (jig_images, geo_images, targets, indices) in enumerate(tqdm_gen):
         data_time.update(time.time() - end)
-
+        # batch_size = geo_images[0].size(0)
         if torch.cuda.is_available():
             targets = targets.cuda()
-            geo_images = [data.cuda() for data in geo_images]
-        rot_color_data = rot_color_transformation(geo_images[0],opt.trans_type)
-        batch_size = geo_images[0].size(0)
-
+            geo_images = [data.cuda(opt.gpu, non_blocking=True) for data in geo_images]
+        rot_color_data,n = rot_color_transformation(geo_images[0],opt.trans_type)
+        
         # data processing
         mix_x1, y_a1, y_b1, index1, lam1 = mix_data_lab(geo_images[0], targets)
         mix_x2, y_a2, y_b2, index2, lam2 = mix_data_lab(geo_images[1], targets)
         mix_data = torch.cat((mix_x1, mix_x2), dim=0)
 
-        n = rot_color_data.size(0) // batch_size
+        # n = rot_color_data.size(0) // batch_size
         multi_labels = torch.stack([targets * n + i for i in range(n)], 1).view(-1)
-
-        mix_images, permute, bs_all, un_shuffle_permute = montage_opera(jig_images)
+        
+        for j in range(4):
+            jig_images[j] = jig_images[j].cuda(opt.gpu, non_blocking=True)
+        mix_images, permute, bs_all, un_shuffle_permute = ddp_montage_opera(jig_images)
         # forward compute
-
         _,logits, m_logits, out_s = model_s(rot_color_data)
         _,_, _, mix_feat = model_s(mix_data)
-
         mix_clu_feat = model_s(mix_images, use_clu=True)
+        
+        logits = concat_all_gather(logits)
+        m_logits = concat_all_gather(m_logits)
+        out_s = concat_all_gather(out_s)
+        mix_feat = concat_all_gather(mix_feat)
+        mix_clu_feat = concat_all_gather(mix_clu_feat)
+        
         mix_clu_gather = multi_decouple_feature(mix_clu_feat, opt.m_patch)
         order_targets = targets.repeat(opt.m_patch * opt.m_patch)
         mix_targets = order_targets[permute]
@@ -575,6 +586,12 @@ def train(epoch, train_loader, model_s, model_t, criterion_supclu_l,criterion_su
             _,logits_t, m_logits_t, out_t = model_t(rot_color_data)
             _,_, _, mix_feat_t = model_t(mix_data)
             mix_clu_feat_t = model_t(mix_images, use_clu=True)
+            
+            logits_t = concat_all_gather(logits_t)
+            m_logits_t = concat_all_gather(m_logits_t)
+            out_t = concat_all_gather(out_t)
+            mix_feat_t = concat_all_gather(mix_feat_t)
+            mix_clu_feat_t = concat_all_gather(mix_clu_feat_t)
             mix_clu_gather_t = multi_decouple_feature(mix_clu_feat_t, opt.m_patch)
             local_feat_t = model_t.module.local_head(mix_clu_gather_t)
             local_feat_t_norm = F.normalize(local_feat_t, dim=-1)
@@ -582,6 +599,8 @@ def train(epoch, train_loader, model_s, model_t, criterion_supclu_l,criterion_su
         # compute loss
         logits = logits[::n]
         logits_t = logits_t[::n]
+        multi_labels = concat_all_gather(multi_labels)
+        targets = concat_all_gather(targets)
         joint_loss = F.cross_entropy(m_logits, multi_labels)
         single_loss = F.cross_entropy(logits, targets)
         agg_preds = 0
@@ -592,9 +611,12 @@ def train(epoch, train_loader, model_s, model_t, criterion_supclu_l,criterion_su
                                      F.softmax(agg_preds.detach() / opt.distill_t, 1),
                                      reduction='batchmean')
 
+        index1 = concat_all_gather(index1)
+        index2 = concat_all_gather(index2)
         if opt.use_global_feat:
             if n == 12 or n == 24:
                 s = int(n // 4)
+               
                 out_s_sup = out_s.view(batch_size, n, out_s.size(1)).permute(1, 0, 2)  # n batch dim
                 out_t_sup = out_t.view(batch_size,n,out_t.size(1)).permute(1,0,2)
 
@@ -610,19 +632,31 @@ def train(epoch, train_loader, model_s, model_t, criterion_supclu_l,criterion_su
             mix_loss= mixup_supcontrastive_loss(mix_feat, targets,opt.mix_t, batch_size, index1, index2, lam1, lam2,out_s_subfeat,global_num)
         else:
             mix_loss= mixup_supcontrastive_loss(mix_feat, targets,opt.mix_t, batch_size, index1, index2, lam1, lam2)
-
+        # mix_loss = concat_all_gather(mix_loss)
         global_labels = torch.stack([targets for i in range(n)], 1).view(-1)
         global_agg_loss = criterion_supclu_g(out_s, global_labels)
+        # global_agg_loss = concat_all_gather(global_agg_loss)
 
         sup_loss = single_loss + joint_loss + distillation_loss.mul(opt.distill_t ** 2)
+        
+        # sup_loss = concat_all_gather(sup_loss)
 
         # compute distillation loss
+        # mix_rd_loss = DIST_LOSS(mix_feat, mix_feat_t)
+        # loca_rd_loss = DIST_LOSS(local_feat_norm, local_feat_t_norm)
+        # global_rd_loss = DIST_LOSS(out_s,out_t)
+        
+        # loss_rd = concat_all_gather(mix_rd_loss) + loca_rd_loss + concat_all_gather(global_rd_loss)
         loss_rd = DIST_LOSS(mix_feat, mix_feat_t) + DIST_LOSS(local_feat_norm, local_feat_t_norm) + DIST_LOSS(out_s,out_t)
         loss_nld = kl_loss(logits, logits_t) + kl_loss(m_logits, m_logits_t)
+        # loss_nld = concat_all_gather(loss_nld)
+        
         distill_loss = (loss_nld + loss_rd * opt.dist_w) * opt.alpha
 
         loss = sup_loss + global_agg_loss +local_agg_loss + mix_loss + distill_loss
-
+        
+        # logits = concat_all_gather(logits)
+        # targets = concat_all_gather(targets)
         acc1, acc5 = accuracy(logits, targets, topk=(1, 5))
         losses.update(loss.item())
         top1.update(acc1[0])
@@ -643,6 +677,14 @@ def train(epoch, train_loader, model_s, model_t, criterion_supclu_l,criterion_su
     return loss
 
 
+def concat_all_gather(tensor):
+    tensors_gather = [torch.ones_like(tensor)
+        for _ in range(torch.distributed.get_world_size())]
+    tensors_gather = diffdist.functional.all_gather(tensors_gather, tensor, next_backprop=None, inplace=True)
+
+    output = torch.cat(tensors_gather, dim=0)
+    return output
+
 def montage_opera(images):
     n, c, h, w = images[0].shape
     permute = torch.randperm(n * 4).cuda()
@@ -655,6 +697,33 @@ def montage_opera(images):
     col2 = torch.cat([images_gather[2 * n:3 * n], images_gather[3 * n:]], dim=3)
     images_gather = torch.cat([col1, col2], dim=2).cuda()
     return images_gather, permute, n, un_shuffle_permute
+
+def ddp_montage_opera(images):
+    
+    images_gather = []
+    
+    for i in range(4):
+            batch_size_this = images[i].shape[0]
+            images_gather.append(concat_all_gather(images[i]))
+            batch_size_all = images_gather[i].shape[0]
+            
+    num_gpus = batch_size_all // batch_size_this
+    n, c, h, w = images[0].shape
+    permute = torch.randperm(n * 4).cuda()
+    
+    torch.distributed.broadcast(permute, src=0)
+    un_shuffle_permute = torch.argsort(permute)
+    images_gather = torch.cat(images, dim=0)
+    images_gather = images_gather[permute, :, :, :]
+
+    col1 = torch.cat([images_gather[0:n], images_gather[n:2 * n]], dim=3)
+    col2 = torch.cat([images_gather[2 * n:3 * n], images_gather[3 * n:]], dim=3)
+    images_gather = torch.cat([col1, col2], dim=2)
+    
+    bs = images_gather.shape[0] // num_gpus
+    gpu_idx = torch.distributed.get_rank()
+    
+    return images_gather[bs*gpu_idx:bs*(gpu_idx+1)], permute, n, un_shuffle_permute
 
 
 def multi_decouple_feature(feature, m):
