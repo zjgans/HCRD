@@ -353,7 +353,7 @@ def train(epoch, train_loader, model_s, model_t, criterion_supclu_l,criterion_su
         # forward compute
         _,logits, m_logits,out_s = model_s(aug_data)
         _,_,_,mix_feat = model_s(mix_data)
-        #
+        # local forward
         local_clu_feat = model_s(mix_images, use_clu=True)
         local_clu_gather = multi_decouple_feature(local_clu_feat, opt.m_patch)
         order_targets = targets.repeat(opt.m_patch * opt.m_patch)
