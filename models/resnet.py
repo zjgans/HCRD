@@ -245,7 +245,7 @@ class ResNet(nn.Module):
             layers.append(layer)
 
         return nn.Sequential(*layers)
-
+     #return the global and loacl features
     def forward(self, x, is_feat=False, use_clu=False):
         x = self.layer1(x)
         f0 = x
