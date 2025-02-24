@@ -30,12 +30,13 @@ from dataset.utils import Trans_to_Num,rot_color_transformation
 from dataset.mini_imagenet import ImageNet, MetaImageNet
 from dataset.tiered_imagenet import TieredImageNet, MetaTieredImageNet
 from dataset.cifar import CIFAR100, MetaCIFAR100
+from data.cifar import CustomCIFAR100
+from data.imagenet import CustomImageNet
+from modules.sla_hcrd import HCRD
+from dataloader import Preprocessor,JigCluTransform,get_eval_dataloader,get_train_dataloader_updated,get_eval_dataloader_updated
 
-from modules.sla_hcrd import  HCRD
-from dataloader import Preprocessor,JigCluTransform,get_eval_dataloader
-
-os.environ["CUDA_VISIBLE_DEVICES"] ='1,2'
-os.environ["CUDA_LAUNCH_BLOCKING"]='1'
+# os.environ["CUDA_VISIBLE_DEVICES"] ='1,2'
+# os.environ["CUDA_LAUNCH_BLOCKING"]='1'
 mkl.set_num_threads(2)
 
 def parse_option():
@@ -47,11 +48,11 @@ def parse_option():
     parser.add_argument('--batch_size', type=int, default=128, help='batch_size')
     parser.add_argument('--rate',type=float,default=1)
     parser.add_argument('--num_workers', type=int, default=4, help='num of workers to use')
-    parser.add_argument('--epochs', type=int, default=60, help='number of training epochs')
+    parser.add_argument('--epochs', type=int, default=90, help='number of training epochs')
 
     # optimization
     parser.add_argument('--learning_rate', type=float, default=0.05, help='learning rate')
-    parser.add_argument('--lr_decay_epochs', type=str, default='30,40,50', help='where to decay lr, can be a list')
+    parser.add_argument('--lr_decay_epochs', type=str, default='60,80', help='where to decay lr, can be a list')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='decay rate for learning rate')
     parser.add_argument('--weight_decay', type=float, default=5e-4, help='weight decay')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
@@ -60,13 +61,13 @@ def parse_option():
 
     # dataset
     parser.add_argument('--model', type=str, default='resnet12', choices=model_pool)
-    parser.add_argument('--dataset', type=str, default='CIFAR-FS',
+    parser.add_argument('--dataset', type=str, default='tieredImageNet',
                         choices=['miniImageNet', 'tieredImageNet', 'CIFAR-FS', 'FC100', 'cub', 'cross'])
     parser.add_argument('--cross_dataset', type=str, default='cub', choices=['cub', 'cars', 'places', 'plantae'])
     parser.add_argument('--transform', type=str, default='A', choices=transforms_list)
     parser.add_argument('--use_trainval', type=bool, help='use trainval set')
     parser.add_argument('--use_resume', action='store_true', help='use the result of training before')
-    parser.add_argument('--resume_file', type=str, default='ckpt_epoch_10.pth')
+    parser.add_argument('--resume_file', type=str, default='ckpt_epoch_25.pth')
 
     # cosine annealing
     parser.add_argument('--cosine', action='store_true', help='using cosine annealing')
@@ -74,7 +75,7 @@ def parse_option():
     parser.add_argument('--model_path', type=str, default='./save', help='path to save model')
     parser.add_argument('--tb_path', type=str, default='./tb', help='path to tensorboard')
     parser.add_argument('--record_path', type=str, default='./record', help='record the data of results')
-    parser.add_argument('--data_root_path', type=str, default='/~/dataset', help='path to data root')
+    parser.add_argument('--data_root_path', type=str, default='data/~', help='path to data root')
     parser.add_argument('--cross_domain', type=bool, default=False)
 
     # meta setting
@@ -87,7 +88,7 @@ def parse_option():
                         help='The number of augmented samples for each meta test sample')
 
     parser.add_argument('--test_batch_size', type=int, default=1, metavar='test_batch_size', help='Size of test batch)')
-    parser.add_argument('-t', '--trial', type=str, default='new_test_distill_2gpu', help='the experiment id')
+    parser.add_argument('-t', '--trial', type=str, default='new', help='the experiment id')
 
     # hyper parameters
     parser.add_argument('--alpha', type=float, default=0.5, help='loss coefficient for knowledge distillation loss')
@@ -105,10 +106,10 @@ def parse_option():
     parser.add_argument('--m_patch', type=int,default=2,help='the rule of split for one image,m_patch x m_patch')
     parser.add_argument('--use_global_feat', type=bool, default=True, help='Whether to add global feature instance for mixup contrastive loss')
 
-    parser.add_argument('-gpu', default='1,2', help='the GPU ids e.g. \"0\", \"0,1\", \"0,1,2\", etc')
+    parser.add_argument('-gpu', default='1,2,3,4', help='the GPU ids e.g. \"0\", \"0,1\", \"0,1,2\", etc')
     parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
             distributed training; see https://pytorch.org/docs/stable/distributed.html""")
-    parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
+    parser.add_argument("--local_rank", default=-1, type=int, help="Please ignore and do not set this argument.")
     parser.add_argument('--multiprocessing-distributed', action='store_true',
                         help='Use multi-processing distributed training to launch '
                              'N processes per node, which has N GPUs. This is the '
@@ -357,7 +358,6 @@ def get_train_dataloader(opt):
         val_dataset = Preprocessor(val_dataset.img_label, [train_trans,train_trans_aug], JigCluTransform(opt, trans))
         test_dataset = Preprocessor(test_dataset.img_label, [train_trans,train_trans_aug], JigCluTransform(opt, trans))
         dataset = ConcatDataset([train_dataset, val_dataset, test_dataset])
-
         n_cls = 64 + 16 + 20
 
     else:
@@ -392,13 +392,13 @@ def main():
     print(f"Data loaded: there are {len(dataset)} images.")
 
     # model
-    model_s = create_model(opt.model, n_cls, opt.dataset,embd_size=opt.proj_dim,num_trans=opt.trans)
+    model = create_model(opt.model, n_cls, opt.dataset,embd_size=opt.proj_dim,num_trans=opt.trans)
     model_t = create_model(opt.model, n_cls, opt.dataset,embd_size=opt.proj_dim,num_trans=opt.trans)
     # wandb.watch(model_s)
 
-    model_s,model_t = model_s.cuda(),model_t.cuda()
-    if has_batchnorms(model_s):
-        model_s = nn.SyncBatchNorm.convert_sync_batchnorm(model_s)
+    model,model_t = model.cuda(),model_t.cuda()
+    if has_batchnorms(model):
+        model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
         model_t = nn.SyncBatchNorm.convert_sync_batchnorm(model_t)
 
         model_t = nn.parallel.DistributedDataParallel(model_t,device_ids=[opt.gpu])
@@ -406,8 +406,8 @@ def main():
     else:
         model_t_without_ddp = model_t
 
-    model_s = nn.parallel.DistributedDataParallel(model_s,device_ids=[opt.gpu])
-    model_t_without_ddp.load_state_dict(model_s.module.state_dict())
+    model = nn.parallel.DistributedDataParallel(model,device_ids=[opt.gpu])
+    model_t_without_ddp.load_state_dict(model.module.state_dict())
 
     for p in model_t.parameters():
         p.requires_grad = False
@@ -415,12 +415,12 @@ def main():
     # optimizer
     if opt.adam:
         print("Adam")
-        optimizer = torch.optim.Adam(model_s.parameters(),
+        optimizer = torch.optim.Adam(model.parameters(),
                                      lr=opt.learning_rate,
                                      weight_decay=0.0005)
     else:
         print("SGD")
-        optimizer = optim.SGD(model_s.parameters(),
+        optimizer = optim.SGD(model.parameters(),
                               lr=opt.learning_rate,
                               momentum=opt.momentum,
                               weight_decay=opt.weight_decay)
@@ -436,12 +436,12 @@ def main():
         restart_from_checkpoint(
             os.path.join(opt.save_folder, opt.resume_file),
             run_variables=to_restore,
-            model_s=model_s,
+            model=model,
             model_t = model_t,
             optimizer=optimizer,
         )
     start_epoch = to_restore['epoch']
-    multibranch_model = HCRD(opt,n_cls,model_s,model_t).cuda()
+    multibranch_model = HCRD(opt,n_cls,model,model_t).cuda()
 
     for epoch in range(start_epoch, opt.epochs+1):
         train_loader.sampler.set_epoch(epoch)
@@ -459,13 +459,13 @@ def main():
             state = {
                 'epoch': epoch,
                 'optimizer': optimizer.state_dict(),
-                'model': model_s.state_dict(),
+                'model': model.state_dict(),
                 'model_t': model_t.state_dict(),
             }
             if epoch % opt.eval_freq ==0 or epoch==opt.epochs:
 
                 start = time.time()
-                feat_meta_test_acc, feat_meta_test_std = meta_test(model_s, meta_testloader, is_feat=True)
+                feat_meta_test_acc, feat_meta_test_std = meta_test(model, meta_testloader, is_feat=True)
                 test_time = time.time() - start
                 print('Feat Meta Test Acc: {:.4f}, Feat Meta Test std: {:.4f}, Time: {:.1f}'.format(feat_meta_test_acc,
                                                                                                     feat_meta_test_std,
@@ -480,7 +480,7 @@ def main():
     # final report
     if dist.get_rank()==0:
         print("GENERATING FINAL REPORT")
-        generate_final_report(model_s, opt)
+        # generate_final_report(model, opt)
         print(opt.save_folder)
 
 def train(epoch, train_loader, model,optimizer, opt):
