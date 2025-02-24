@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 import random
 
-
+# dataset for Imagenet
 class ImageNet(Dataset):
     def __init__(self, args, partition='train', pretrain=True,transform=None):
         super(Dataset, self).__init__()
