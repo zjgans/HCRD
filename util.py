@@ -401,7 +401,7 @@ def record_data(epoch,top1,top5,test_acc,test_ic,val_acc,val_ic,save_path):
     data = pd.DataFrame([list])
     data.to_csv(save_path,mode='a',header=False,index=False)
 
-
+# report the final result in few-shot setting
 def generate_final_report(model, opt,wandb):
     from eval.meta_eval import meta_test
     
