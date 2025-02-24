@@ -13,6 +13,7 @@ from dataset.cifar import CIFAR100, MetaCIFAR100
 from dataset.cub import CUB,MetaCUB
 from dataset.transform_cfg import transforms_options, transforms_test_options
 from dataset.utils import RandAugmentMC, GaussianBlur
+# dataloader for all dataset
 def get_dataloaders(opt):
     # dataloader
     train_partition = 'trainval' if opt.use_trainval else 'train'
