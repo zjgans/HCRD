@@ -16,7 +16,8 @@ def inter_class_relation(y_s, y_t):
 
 def intra_class_relation(y_s, y_t):
     return inter_class_relation(y_s.transpose(0, 1), y_t.transpose(0, 1))
-
+    
+#loss used in our work
 def DIST_LOSS(y_s, y_t,beta=1,gamma=2):
     assert y_s.ndim in (2, 4)
     if y_s.ndim == 4:
