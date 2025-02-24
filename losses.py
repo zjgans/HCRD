@@ -41,7 +41,8 @@ def simple_contrstive_loss(vi_batch, vi_t_batch, mn_arr, temp_parameter=0.1):
     neg_log_img_pair_probs = -1 * torch.log(batch_prob_arr)
     loss_i_i_t = torch.sum(neg_log_img_pair_probs) / neg_log_img_pair_probs.size()[0]
     return loss_i_i_t
-
+    
+# used in our work
 def mixup_supcontrastive_loss(feature,target,temperature,batch_size,index1,index2,lam1,lam2,sub_feat=None,sub_num=None):
 
         target_1 = target.contiguous().view(-1,1)
