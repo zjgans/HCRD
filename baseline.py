@@ -23,7 +23,7 @@ from models.util import create_model
 from util import adjust_learning_rate, accuracy, AverageMeter,Meter, rotrate_concat, Logger, generate_final_report, \
     restart_from_checkpoint,data_write_csv,get_model_complexity,set_gpu,to_one_hot,distance,mix_data_lab,record_data
 from eval.meta_eval import meta_test
-from local_branch.base_hybird import Aggregation
+from modules.base_hcrd import HCRD
 from dataloader import get_dataloaders
 from dataset.utils import Trans_to_Num,rot_color_transformation
 
