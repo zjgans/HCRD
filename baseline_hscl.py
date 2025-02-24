@@ -63,8 +63,8 @@ def parse_option():
     parser.add_argument('--model_path', type=str, default='./save', help='path to save model')
     parser.add_argument('--tb_path', type=str, default='./tb', help='path to tensorboard')
     parser.add_argument('--record_path',type=str,default='./record',help='record the data of results')
-    parser.add_argument('--data_root', type=str, default='/data/lxj/odata/dataset', help='path to data root')
-    parser.add_argument('--data_root_path', type=str, default='/data/lxj/odata/dataset', help='path to data root')
+    parser.add_argument('--data_root', type=str, default='~/data/~/dataset', help='path to data root')
+    parser.add_argument('--data_root_path', type=str, default='~/data/~/dataset', help='path to data root')
     parser.add_argument('--cross_domain', type=bool, default=False)
 
     # meta setting
@@ -77,7 +77,7 @@ def parse_option():
                         help='The number of augmented samples for each meta test sample')
 
     parser.add_argument('--test_batch_size', type=int, default=1, metavar='test_batch_size', help='Size of test batch)')
-    parser.add_argument('-t', '--trial', type=str, default='aug2_ce_G-SCL_R-SCL', help='the experiment id')
+    parser.add_argument('-t', '--trial', type=str, default='test', help='the experiment id')
 
     # hyper parameters
     parser.add_argument('--alpha', type=float, default=0.5, help='loss coefficient for knowledge distillation loss')
