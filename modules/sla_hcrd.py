@@ -216,7 +216,8 @@ class HCRD(nn.Module):
         anchor_dot_contrast = torch.div(
             torch.matmul(mix_feature, mix_feature.t()),
             self.temperature)
-
+        
+         # use the global features
         if sub_feat is not None:
             sub_feat = sub_feat.detach()
             global_dot_contrast = torch.div(torch.matmul(mix_feature,sub_feat.t()),self.temperature)
