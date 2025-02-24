@@ -165,7 +165,7 @@ def parse_option():
     # extras
     opt.fresh_start = True
     return opt
-
+# the main code for our work
 def main():
     opt = parse_option()
     wandb.init(project=opt.model_path.split("/")[-1], tags=opt.tags)
