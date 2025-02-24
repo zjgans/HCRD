@@ -24,7 +24,7 @@ def normalize(x):
     out = x.div(norm)
     return out
 
-
+# test on few-shot dataset
 def meta_test(net, testloader, is_feat=False, is_norm=True, classifier='LR'):
     net = net.eval()
     acc = []
