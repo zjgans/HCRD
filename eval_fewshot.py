@@ -25,7 +25,7 @@ from eval.cls_eval import validate, embedding
 from dataloader import get_eval_dataloader,get_dataloaders
 
 mkl.set_num_threads(2)
-
+# test the few-shot dataset
 def parse_option():
     parser = argparse.ArgumentParser('argument for training')
 
